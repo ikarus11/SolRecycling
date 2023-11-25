@@ -78,8 +78,6 @@ void setup() {
 }
 
 void loop() {
-    speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
-
     // for debugging
     // Serial.println(speed);
 
@@ -87,10 +85,13 @@ void loop() {
     switch(state) {
         case 0:
             /* WAITING */
+            speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
+
             if (speed > (speed_min+hysterese)) {
                 Serial.println("Starting");
                 // enable stepper - current to coils
                 stepper.enableOutputs();
+                stepper.setSpeed(speed);
                 // indicate stepper is enabled with LED
                 digitalWrite(LED_BUILTIN, HIGH);
                 // switch state to running
@@ -99,42 +100,42 @@ void loop() {
             break;
         case 10:
             /* RUNNING */
-            if (speed < speed_min) {
-                Serial.println("Stopping");
-                // deaccelerate stepper
-                stepper.setSpeed(0);
-                stepper.runSpeed();
-                // switch state to stopping
-                state = 20;
-            }
-            else
+            while (speed > speed_min)
             {
+                speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
+
                 if (detectChange(speed, speed_old, resol))
                 {
                     //Serial.println(speed);
                     stepper.setSpeed(speed);
                     speed_old = speed;
                 }
+
                 stepper.runSpeed();
+                // Serial.println(String(speed) + "-" + String(stepper.speed()));
             }
+            
+            Serial.println("Stopping");
+            // switch state to stopping
+            state = 20;
             break;
         case 20:
             /* STOPPING */
-            if (stepper.speed()!=0)
+            stepper.setSpeed(0);
+
+            while (stepper.speed()!=0)
             {
-                // wait to be stopped
                 stepper.runSpeed();
             }
-            else
-            {
-                Serial.println("Stopped");
-                // disable stepper
-                stepper.disableOutputs();
-                // indicate stepper has no current
-                digitalWrite(LED_BUILTIN, LOW);
-                // switch to initial/waiting state
-                state = 0;
-            }
+            
+            Serial.println("Stopped");
+            // disable stepper
+            stepper.disableOutputs();
+            // indicate stepper has no current
+            digitalWrite(LED_BUILTIN, LOW);
+            // switch to initial/waiting state
+            state = 0;
+
             break;
     }
 
