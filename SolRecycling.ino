@@ -1,4 +1,5 @@
 #include <AccelStepper.h>
+#include <MultiStepper.h>
 
 // Define the stepper motor connections
 #define DIR_PIN     2
