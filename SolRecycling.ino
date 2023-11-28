@@ -2,102 +2,55 @@
 #include <MultiStepper.h>
 #include <LiquidCrystal.h>
 
+/* --- CLASSES --- */
+#include "Timer.h"
+
+/* --- FUNCTIONS ---*/
+#include "HelperFcn.h"
+
+/* --- STEPPER --- */
 // Define the stepper motor connections
 #define DIR_PIN     2
 #define STEP_PIN    3
 #define EN_PIN      4
+// Create an AccelStepper object
+AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
+// stepper variables
+const int steps_p_rev   = 200;  // steps per revolution full step
 
+/* --- LCD DISPLAY --- */
 // initialize the library by associating any needed LCD interface pin
 // with the arduino pin number it is connected to
 const int rs = 11, en = 12, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
-// functions
-int rpm2speed(float rpm, int stepPerRev) {
-    return rpm/60*stepPerRev;
-}
+/* --- TIMERS --- */
+Timer timer_update_speed(100);    // read potetiometer every 100 ms
+Timer timer_update_lcd(300);     // lcd display update every 300 ms
 
-float speed2rpm(int stepPerSec, int stepPerRev) {
-    return (float)stepPerSec/stepPerRev*60.0;
-}
-
-bool detectChange(int currentSpeed, int previousSpeed, int treashold) {
-    if (abs(previousSpeed - currentSpeed) > treashold) {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-void printState(int desired, int actual, int stepsPerRev, int stat){
-    // Calculate desired and actual speeds
-    float desiredSpeed = speed2rpm(desired, stepsPerRev);
-    float actualSpeed = speed2rpm(actual, stepsPerRev);
-
-    // Move the cursor to the beginning of the line and overwrite the content
-    switch (stat)
-    {
-    case 0:
-        lcd.setCursor(0, 0);
-        lcd.print("SLEEP MODE");
-        lcd.setCursor(0, 1);
-        lcd.print(actualSpeed);
-        lcd.setCursor(7,1);
-        lcd.print("RPM");
-        break;
-    case 10:
-        lcd.setCursor(0, 0);
-        lcd.print("RUNNING     ");
-        lcd.setCursor(0, 1);
-        lcd.print(actualSpeed);
-        lcd.setCursor(7,1);
-        lcd.print("RPM");
-        break;
-    case 20:
-        lcd.setCursor(0, 0);
-        lcd.print("STOPPING    ");
-        lcd.setCursor(0, 1);
-        lcd.print(actualSpeed);
-        lcd.setCursor(7,1);
-        lcd.print("RPM");
-        break;
-    default:
-        break;
-    }
-}
-
-// variables
-const int steps_p_rev   = 200;                              // steps per revolution full step
-const int speed_max     = rpm2speed(125, steps_p_rev);      // Vorgabe 120
-const int speed_min     = rpm2speed(25, steps_p_rev);       // Vorgabe 30
+/* VARIABLES */
+const int speed_max     = rpm2speed(125, steps_p_rev);      // Vorgabe 120 rpm
+const int speed_min     = rpm2speed(25, steps_p_rev);       // Vorgabe 30 rpm
 
 // TODO: adjust values
 const float acceleration_SI = 10;               // 1/s^2 
 const int acceleration      = acceleration_SI;  // steps/s^2
 
+/* INPUTS */
 int AnalogIn    = A0;       // Potentiometer
 
-// states
+/* STATE MACHINE */
 int state           = 0;
 int speed           = 0;
 int desired_speed   = 0;
 
-// signals and filters
+/* SIGNALS HANDLING */
 const int hysterese = 5; // steps per second
-const int resol     = 3; // resolution for potentiometer
 
-// timeing
-unsigned long previousMillis    = 0;
-const long interval             = 100; // Interval of 1 second
+/* MONITORING */
+float speed_rpm = speed2rpm(speed, steps_p_rev);
 
-// SI
-float speed_rpm     = speed2rpm(speed, steps_p_rev);
-
-// Create an AccelStepper object
-AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
-
+/* SETUP */
 void setup() {
     // Stepper configuration
     stepper.setMaxSpeed(speed_max);         // Set the maximum speed in steps per second
@@ -110,9 +63,13 @@ void setup() {
     // Set the initial states
     state           = 0;
     
-    // enable communication
+    // enable serial communication
     Serial.begin(115200);
     
+    // Timers
+    timer_update_speed.start();
+    timer_update_lcd.start();
+
     // LED configuration
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
@@ -120,26 +77,27 @@ void setup() {
     // set up the LCD's number of columns and rows:
     lcd.begin(16, 2);
     
-    printState(desired_speed, speed, steps_p_rev, state);
+    printState(lcd, desired_speed, speed, steps_p_rev, state);
 
     // print conf to serial port
     Serial.println("Info:");
     Serial.println("Max Speed:" + String(speed_max));
     Serial.println("Min Speed:" + String(speed_min));
     Serial.println("Stepper Control Mode:");
+
 }
 
 void loop() {
-    // for debugging
-    // Serial.println(speed);
-    // lcd.noDisplay();
     // state machine
     switch(state) {
         case 0:
             /* WAITING */
             desired_speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
 
-            printState(desired_speed, stepper.speed(), steps_p_rev, state);
+            if (timer_update_lcd.clock()) {
+                timer_update_lcd.reset();
+                printState(lcd, desired_speed, stepper.speed(), steps_p_rev, state);
+            }
 
             if (desired_speed > (speed_min+hysterese)) {
                 Serial.println("Starting");
@@ -153,18 +111,14 @@ void loop() {
             break;
         case 10:
             /* RUNNING */
-            previousMillis = 0;
-
             while (desired_speed > speed_min)
             {
                 desired_speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
-                unsigned long currentMillis = millis();
 
-                if (currentMillis - previousMillis >= interval) // call every 10 ms
-                {
+                if (timer_update_speed.clock()) {
                     speed = stepper.speed();
 
-                    previousMillis = currentMillis;
+                    timer_update_speed.reset();
 
                     if (abs(desired_speed - speed) > acceleration) {
                         if (desired_speed > speed) {
@@ -175,11 +129,17 @@ void loop() {
                             // Serial.println(String(desired_speed) + "-" + String(speed) + "->" + String(speed-acceleration));
                             stepper.setSpeed(speed-acceleration);
                         }
+                    } else {
+                        stepper.setSpeed(desired_speed);
                     }
                     Serial.println("\r"+String(stepper.speed()));
-                    printState(desired_speed, stepper.speed(), steps_p_rev, state);
                 }
                 
+                if (timer_update_lcd.clock()) {
+                    timer_update_lcd.reset();
+                    printState(lcd, desired_speed, stepper.speed(), steps_p_rev, state);
+                }
+
                 stepper.runSpeed();
             }
             
@@ -189,21 +149,17 @@ void loop() {
             break;
         case 20:
             /* STOPPING */
-            previousMillis = 0;
 
             while (stepper.speed() > 0.0) {
-                unsigned long currentMillis = millis();
-
-                if (currentMillis - previousMillis >= interval) // call every 10 ms
+                if (timer_update_speed.clock()) // call every 10 ms
                 {
-                    previousMillis = currentMillis;
                     speed = stepper.speed();
+                    timer_update_speed.reset();
 
                     stepper.setSpeed(speed-acceleration);
                     
-                    printState(desired_speed, stepper.speed(), steps_p_rev, state);
+                    printState(lcd, desired_speed, stepper.speed(), steps_p_rev, state);
                 }
-                
                 stepper.runSpeed();
             }
 
