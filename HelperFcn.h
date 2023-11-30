@@ -6,6 +6,9 @@
 // convert rpm to steps per second
 int rpm2speed(float rpm, int stepPerRev);
 
+// check if speed possible
+int checkSpeed(int speed);
+
 // convert steps per second to rpm
 float speed2rpm(int stepPerSec, int stepPerRev);
 

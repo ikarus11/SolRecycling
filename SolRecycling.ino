@@ -13,6 +13,7 @@
 #define DIR_PIN     2
 #define STEP_PIN    3
 #define EN_PIN      4
+
 // Create an AccelStepper object
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 // stepper variables
@@ -29,15 +30,15 @@ Timer timer_update_speed(100);    // read potetiometer every 100 ms
 Timer timer_update_lcd(300);     // lcd display update every 300 ms
 
 /* VARIABLES */
-const int speed_max     = rpm2speed(125, steps_p_rev);      // Vorgabe 120 rpm
-const int speed_min     = rpm2speed(25, steps_p_rev);       // Vorgabe 30 rpm
+const int speed_max     = checkSpeed(rpm2speed(125, steps_p_rev));  // Vorgabe 120 rpm
+const int speed_min     = rpm2speed(25, steps_p_rev);               // Vorgabe 30 rpm
 
 // TODO: adjust values
-const float acceleration_SI = 10;               // 1/s^2 
+const float acceleration_SI = 5;               // 1/s^2 
 const int acceleration      = acceleration_SI;  // steps/s^2
 
 /* INPUTS */
-int AnalogIn    = A0;       // Potentiometer
+#define ANALOG_IN A0
 
 /* STATE MACHINE */
 int state           = 0;
@@ -45,7 +46,7 @@ int speed           = 0;
 int desired_speed   = 0;
 
 /* SIGNALS HANDLING */
-const int hysterese = 5; // steps per second
+const int hysterese = 5;    // steps per second
 
 /* MONITORING */
 float speed_rpm = speed2rpm(speed, steps_p_rev);
@@ -53,12 +54,12 @@ float speed_rpm = speed2rpm(speed, steps_p_rev);
 /* SETUP */
 void setup() {
     // Stepper configuration
-    stepper.setMaxSpeed(speed_max);         // Set the maximum speed in steps per second
-    stepper.setAcceleration(acceleration);  // Set the acceleration in steps per second per second    
-    stepper.setCurrentPosition(0);          // Set the initial position
-    stepper.setEnablePin(EN_PIN);           // Set en/disable pin of driver
-    stepper.setPinsInverted(false,false,true);
-    stepper.disableOutputs();               // diable current to stepper
+    stepper.setMaxSpeed(speed_max);             // Set the maximum speed in steps per second
+    stepper.setAcceleration(acceleration);      // Set the acceleration in steps per second per second    
+    stepper.setCurrentPosition(0);              // Set the initial position
+    stepper.setEnablePin(EN_PIN);               // Set en/disable pin of driver
+    stepper.setPinsInverted(false,false,false); // DIRECTION/STEP/ENABLE
+    stepper.disableOutputs();                   // diable current to stepper
     
     // Set the initial states
     state           = 0;
@@ -92,7 +93,7 @@ void loop() {
     switch(state) {
         case 0:
             /* WAITING */
-            desired_speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
+            desired_speed = map(analogRead(ANALOG_IN), 0, 1023, 0, speed_max);
 
             if (timer_update_lcd.clock()) {
                 timer_update_lcd.reset();
@@ -113,7 +114,7 @@ void loop() {
             /* RUNNING */
             while (desired_speed > speed_min)
             {
-                desired_speed = map(analogRead(AnalogIn), 0, 1023, 0, speed_max);
+                desired_speed = map(analogRead(ANALOG_IN), 0, 1023, 0, speed_max);
 
                 if (timer_update_speed.clock()) {
                     speed = stepper.speed();
