@@ -19,3 +19,5 @@ Control parameters can be easily adjusted in parameters.h file. (Pay attention t
 
 ## ToDo's
 - Add safety switch directly to the power supply (manually cut off current).
+- Replace Motor (> 20Nm)
+- Adjust motor driver current to fit the new motor
