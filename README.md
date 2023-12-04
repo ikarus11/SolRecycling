@@ -14,6 +14,9 @@
 - Make sure cabels can not be accidently disconnected!
 - Properly isolate cabels and power supply!
 
+## Requirements
+- [Arduino IDE](https://support.arduino.cc/hc/en-us/articles/360019833020-Download-and-install-Arduino-IDE)
+
 ## Configuration
 Control parameters can be easily adjusted in parameters.h file. (Pay attention to physical/electical limits!)
 
