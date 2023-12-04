@@ -8,38 +8,39 @@
 /* --- FUNCTIONS ---*/
 #include "HelperFcn.h"
 
+/* INPUTS */
+// read potentiometer resistance
+#define ANALOG_IN A7 // A0 for UNO A7 for NANO
+
 /* --- STEPPER --- */
 // Define the stepper motor connections
 #define EN_PIN      4
 #define STEP_PIN    5
 #define DIR_PIN     6
 
-/* INPUTS */
-#define ANALOG_IN A7 // A0 for UNO A7 for NANO
-
 // Create an AccelStepper object
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 // stepper variables
-const int steps_p_rev   = 400;  // steps per revolution (max 150 rpm)
+const int steps_p_rev   = 400;  // steps per revolution (max 150 rpm for 400 sps, gear ratio 1)
 const float gear_ratio  = 1;    // driven / driving
-
-/* --- LCD DISPLAY --- */
-// initialize the library by associating any needed LCD interface pin
-// with the arduino pin number it is connected to
-//const int rs = 11, en = 12, d4 = 5, d5 = 6, d6 = 7, d7 = 8;
-//LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 /* --- TIMERS --- */
 Timer timer_update_speed(100);    // read potetiometer every 100 ms
-Timer timer_update_lcd(1000);     // lcd display update every 300 ms
+Timer timer_update_display(1000);     // lcd display update every 300 ms
 
 /* VARIABLES */
-const int speed_max     = checkSpeed(rpm2speed(125, steps_p_rev, gear_ratio));  // Vorgabe 120 rpm
-const int speed_min     = rpm2speed(20, steps_p_rev, gear_ratio);               // Vorgabe 30 rpm
+// Vorgabe 120 rpm (limited to 1000 sps -> 150 rpm max if gear ratio = 1)
+const int speed_max     = checkSpeed(rpm2speed(125, steps_p_rev, gear_ratio));
+// Vorgabe 30 rpm
+// stops if desired speed below
+const int speed_min     = rpm2speed(20, steps_p_rev, gear_ratio);
 
-// TODO: adjust values
-const float acceleration_SI = 5;               // 1/s^2 
-const int acceleration      = acceleration_SI;  // steps/s^2
+// TODO: adjust acceleration value
+// const float acceleration_SI = 5; // 1/s^2
+// speed gets increased by acceleration every 100 ms
+// e.g. acceleration = 5 leads to 1/40*acceleration*60 = 7.5 rpm/sec
+// which results in 16 seconds to bring system from 0 to 120 rpm
+const int acceleration      = 5;  // steps/s^2
 
 /* STATE MACHINE */
 int state           = 0;
@@ -47,39 +48,35 @@ int speed           = 0;
 int desired_speed   = 0;
 
 /* SIGNALS HANDLING */
+// increase stability of loop
 const int hysterese = 5;    // steps per second
 
 /* MONITORING */
-float speed_rpm = speed2rpm(speed, steps_p_rev, gear_ratio);
+// float speed_rpm = speed2rpm(speed, steps_p_rev, gear_ratio);
 
-/* SETUP */
+/* SETUP / INITIALIZING */
 void setup() {
     // Stepper configuration
     stepper.setMaxSpeed(speed_max);             // Set the maximum speed in steps per second
     stepper.setAcceleration(acceleration);      // Set the acceleration in steps per second per second    
     stepper.setCurrentPosition(0);              // Set the initial position
     stepper.setEnablePin(EN_PIN);               // Set en/disable pin of driver
-    stepper.setPinsInverted(false,false,false); // DIRECTION/STEP/ENABLE
+    stepper.setPinsInverted(false,false,false); // DIRECTION/STEP/ENABLE e.g. change DIRESTION from false to true -> clw to ccw
     stepper.disableOutputs();                   // diable current to stepper
     
     // Set the initial states
     state           = 0;
     
     // enable serial communication
-    Serial.begin(115200);
+    Serial.begin(115200); // read output on this serial port
     
     // Timers
     timer_update_speed.start();
-    timer_update_lcd.start();
+    timer_update_display.start();
 
     // LED configuration
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);
-
-    // set up the LCD's number of columns and rows:
-    // lcd.begin(16, 2);
-    
-    // printState(lcd, desired_speed, speed, steps_p_rev, state);
 
     // print conf to serial port
     Serial.println("Info:");
@@ -88,23 +85,13 @@ void setup() {
     Serial.println("Stepper Control Mode: \n Initialized");
 }
 
+/* MAIN LOOP RUNNING FOREVER*/
 void loop() {
     // state machine
     switch(state) {
         case 0:
             /* WAITING */
             desired_speed = map(analogRead(ANALOG_IN), 0, 1023, 0, speed_max);
-
-
-            //if (timer_update_lcd.clock()) {
-            //    long int start = millis();
-//
-            //    timer_update_lcd.reset();
-            //    printState(lcd, desired_speed, stepper.speed(), steps_p_rev, state);
-            //    long int stop = millis();
-            //
-            //    Serial.println(stop-start);
-            //}
 
             if (desired_speed > (speed_min+hysterese)) {
                 Serial.println("Starting");
@@ -120,38 +107,33 @@ void loop() {
             /* RUNNING */
             while (desired_speed > speed_min)
             {   
-                //long int start = millis();
-
+                // update desired speed
                 if (timer_update_speed.clock()) {
-
+                    // read speed from potentiometer
                     desired_speed = map(analogRead(ANALOG_IN), 0, 1023, 0, speed_max);
                     speed = stepper.speed();
 
+                    // reset timer
                     timer_update_speed.reset();
-
+                    
+                    // set new speed for stepper
                     if (abs(desired_speed - speed) > acceleration) {
                         if (desired_speed > speed) {
-                            // Serial.println(String(desired_speed) + "-" + String(speed) + "->" + String(speed+acceleration));
                             stepper.setSpeed(speed+acceleration);
                         }
                         else if (desired_speed < speed) {
-                            // Serial.println(String(desired_speed) + "-" + String(speed) + "->" + String(speed-acceleration));
                             stepper.setSpeed(speed-acceleration);
                         }
                     } else {
                         stepper.setSpeed(desired_speed);
                     }
-                    // Serial.println("\r"+String(stepper.speed()));
                 }
                 
-                if (timer_update_lcd.clock()) {
-                    timer_update_lcd.reset();
+                // print rotaional speed to Serial
+                if (timer_update_display.clock()) {
+                    timer_update_display.reset();
                     Serial.println(String(speed2rpm(stepper.speed(), steps_p_rev, gear_ratio)));
-                    //printState(lcd, desired_speed, stepper.speed(), steps_p_rev, state);
                 }
-
-                //long int stop = millis();
-                //Serial.println(stop-start);
 
                 stepper.runSpeed();
             }
@@ -179,11 +161,11 @@ void loop() {
 
                 stepper.runSpeed();
 
-                //if (timer_update_lcd.clock())
-                //{
-                    //timer_update_lcd.reset();
-                    //printState(lcd, desired_speed, stepper.speed(), steps_p_rev, state);
-                //}
+                if (timer_update_display.clock())
+                {
+                    timer_update_display.reset();
+                    Serial.println(String(speed2rpm(stepper.speed(), steps_p_rev, gear_ratio)));
+                }
                 
             }
 
